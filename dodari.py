@@ -11,6 +11,7 @@ import logging, warnings
 import copy
 import re, time, platform, shutil, zipfile, subprocess, socket, json, locale, tempfile, threading
 from difflib import SequenceMatcher
+from html import unescape as _html_unescape
 import requests
 import chardet
 
@@ -2389,8 +2390,23 @@ def _dodari_epub_title_subjects(epub_path):
     titles = values('title')
     return (titles[0] if titles else ''), values('subject')
 
+KO_NATURAL_STYLE = (
+    "원문의 구조를 그대로 옮기지 말고, 한국어 원어민이 처음부터 쓴 글처럼 자연스럽게 다듬으십시오. "
+    "다음 번역투를 피하십시오: 무생물 주어(예: '이 방법은 문제를 해결한다' → '이 방법으로 문제를 해결할 수 있다'), "
+    "불필요한 피동('~에 의해 ~되어진다' → 능동), '~것이다'·'~하는 것' 남발, "
+    "'그는'·'그녀는' 같은 대명사 반복(생략 가능하면 생략하고 필요한 경우 명확한 대상 지칭으로 대명사 대체), '~에 대해'·'~에 있어서'·'~를 통해' 남용, "
+    "불필요한 복수 접미사 '~들', 영어 어순 그대로 이어 붙인 긴 관계절. "
+    "과도한 현재진행형 표현('~하는 중이다' → '~하다'를 사용), 예: '비가 오는 중이다' → '비 온다', '뉴욕에서 오는 중이다' → '뉴욕에서 온다'"
+    "단, 의미·고유명사·용어집은 바꾸지 말고 내용을 더하거나 빼지 마십시오. "
+)
+KO_PROPER_NOUN_STYLE = (
+    "사람 이름, 지명 등 고유명사는 한글로 옮기고, 바로 뒤에 괄호로 원문 표기를 덧붙이십시오"
+    "(예: 런던(London), 앨리스(Alice)). 원문 표기는 원문에 쓰인 철자 그대로 적고, "
+    "원문이 한자·가나 등 비로마자여도 같은 방식으로 원문 표기를 괄호에 적으십시오. "
+)
 TONE_CHOICES_KO    = ["서술체 (~다)", "경어체 (~합니다)"]
 BILINGUAL_CHOICES_KO = ["번역문(원문)", "원문(번역문)"]
+OUTPUT_FORMAT_CHOICES_KO = ["원본과 동일", "TXT"]
 
 _UI_CONFIG_PATH = 'ui_config.json'
 _UI_CONFIG_LOCAL_PATH = 'ui_config.local.json'
@@ -2422,7 +2438,7 @@ UI_LANG_NAMES = {
 
 UI_TEXT = {
 'ko': {
-    'app_title': "AI 다국어 번역기 <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>도다리2</a></span> 입니다",
+    'app_title': "AI 다국어 번역기 <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>도다리2</a></span> 입니다",
     'step1':'순서 1','step2':'순서 2','step3':'순서 3','step4':'순서 4','status_tab':'상태창',
     'step1_title':'1. 번역할 파일들 선택',
     'files_label':'파일들',
@@ -2445,10 +2461,14 @@ UI_TEXT = {
     'bilingual_label':"이중언어 표기 방식 (학습용은 '원문(번역문)' 추천)",
     'genre_label':'장르 지정 (AI가 자동 추론)',
     'tone_label':'문체 선택 (일관된 어투 유지)',
+    'natural_ko_label':'번역투 제거 (한국어로 번역할 때, 자연스러운 한국어로 다듬기)',
     'genre_0':'IT 및 엔지니어링','genre_1':'문학 및 소설','genre_2':'인문 및 사회과학',
     'genre_3':'비즈니스 및 경제','genre_4':'영상 및 대본','genre_5':'일반 문서(기본)',
     'tone_0':'서술체 (~다)','tone_1':'경어체 (~합니다)',
     'bilingual_0':'번역문(원문)','bilingual_1':'원문(번역문)',
+    'output_format_label':'결과 파일 형식','output_format_0':'원본과 동일 (기본)','output_format_1':'TXT (평문)',
+    'range_label':'구간 번역 (PDF: 쪽수 / EPUB: 챕터 번호 · TXT는 전체 번역 · 비우면 전체)','range_start':'시작','range_end':'끝',
+    'err_range_invalid':'구간 입력이 올바르지 않습니다. 1 이상의 정수를 입력하고, 시작은 끝보다 클 수 없습니다.','status_total_pages':'총 {n}쪽','status_total_chapters':'총 {n}챕터',
     'glossary_title':'✨ 용어집',
     'btn_glossary_extract':'🔍 AI 용어 자동 추출',
     'glossary_label':'용어집 (원문: 번역어 형식, 줄바꿈으로 구분)',
@@ -2527,7 +2547,7 @@ UI_TEXT = {
     'glossary_cleared':'용어집이 초기화되었습니다.',
 },
 'en': {
-    'app_title': "AI Multilingual Translator <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI Multilingual Translator <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Step 1','step2':'Step 2','step3':'Step 3','step4':'Step 4','status_tab':'Status',
     'step1_title':'1. Select files to translate',
     'files_label':'Files',
@@ -2550,10 +2570,14 @@ UI_TEXT = {
     'bilingual_label':"Bilingual display mode (for learners: 'Original (Translation)' recommended)",
     'genre_label':'Genre (AI auto-inferred)',
     'tone_label':'Tone (consistent style maintained)',
+    'natural_ko_label':'Remove translationese (Korean output only: polish into natural Korean)',
     'genre_0':'IT & Engineering','genre_1':'Literature & Fiction','genre_2':'Humanities & Social Science',
     'genre_3':'Business & Economics','genre_4':'Film & Script','genre_5':'General Document (default)',
     'tone_0':'Narrative (~plain)','tone_1':'Formal (~polite)',
     'bilingual_0':'Translation (Original)','bilingual_1':'Original (Translation)',
+    'output_format_label':'Output file format','output_format_0':'Same as source (default)','output_format_1':'TXT (plain text)',
+    'range_label':'Translate a range (PDF: pages / EPUB: chapter numbers · TXT is always translated in full · leave empty for all)','range_start':'Start','range_end':'End',
+    'err_range_invalid':'Invalid range. Enter whole numbers of 1 or more; the start cannot be greater than the end.','status_total_pages':'{n} pages in total','status_total_chapters':'{n} chapters in total',
     'glossary_title':'✨ Glossary',
     'btn_glossary_extract':'🔍 AI Auto-Extract Terms',
     'glossary_label':'Glossary (source: translation format, one per line)',
@@ -2632,7 +2656,7 @@ UI_TEXT = {
     'glossary_cleared':'Glossary cleared.',
 },
 'ja': {
-    'app_title': "AI多言語翻訳機 <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI多言語翻訳機 <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'手順 1','step2':'手順 2','step3':'手順 3','step4':'手順 4','status_tab':'状態',
     'step1_title':'1. 翻訳するファイルを選択',
     'files_label':'ファイル',
@@ -2659,6 +2683,9 @@ UI_TEXT = {
     'genre_3':'ビジネス・経済','genre_4':'映像・台本','genre_5':'一般文書（デフォルト）',
     'tone_0':'叙述体（〜だ）','tone_1':'丁寧体（〜です）',
     'bilingual_0':'訳文（原文）','bilingual_1':'原文（訳文）',
+    'output_format_label':'出力ファイル形式','output_format_0':'元のファイルと同じ（既定）','output_format_1':'TXT（プレーンテキスト）',
+    'range_label':'範囲を指定して翻訳（PDF：ページ / EPUB：章番号・TXTは全体を翻訳・空欄で全体）','range_start':'開始','range_end':'終了',
+    'err_range_invalid':'範囲の入力が正しくありません。1以上の整数を入力し、開始は終了より大きくできません。','status_total_pages':'全{n}ページ','status_total_chapters':'全{n}章',
     'glossary_title':'✨ 用語集',
     'btn_glossary_extract':'🔍 AI用語自動抽出',
     'glossary_label':'用語集（原文: 訳語 形式、改行区切り）',
@@ -2737,7 +2764,7 @@ UI_TEXT = {
     'glossary_cleared':'用語集をリセットしました。',
 },
 'zh': {
-    'app_title': "AI多语言翻译器 <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI多语言翻译器 <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'步骤 1','step2':'步骤 2','step3':'步骤 3','step4':'步骤 4','status_tab':'状态',
     'step1_title':'1. 选择要翻译的文件',
     'files_label':'文件',
@@ -2764,6 +2791,9 @@ UI_TEXT = {
     'genre_3':'商业与经济','genre_4':'影视与剧本','genre_5':'一般文档（默认）',
     'tone_0':'叙述体','tone_1':'正式体',
     'bilingual_0':'译文（原文）','bilingual_1':'原文（译文）',
+    'output_format_label':'输出文件格式','output_format_0':'与原文件相同（默认）','output_format_1':'TXT（纯文本）',
+    'range_label':'按范围翻译（PDF：页码 / EPUB：章节编号 · TXT 始终全文翻译 · 留空为全部）','range_start':'开始','range_end':'结束',
+    'err_range_invalid':'范围输入无效。请输入大于等于 1 的整数，且起始值不能大于结束值。','status_total_pages':'共 {n} 页','status_total_chapters':'共 {n} 章',
     'glossary_title':'✨ 术语表',
     'btn_glossary_extract':'🔍 AI自动提取术语',
     'glossary_label':'术语表（原文: 译文格式，每行一条）',
@@ -2842,7 +2872,7 @@ UI_TEXT = {
     'glossary_cleared':'术语表已清空。',
 },
 'fr': {
-    'app_title': "Traducteur multilingue IA <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "Traducteur multilingue IA <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Étape 1','step2':'Étape 2','step3':'Étape 3','step4':'Étape 4','status_tab':'Statut',
     'step1_title':'1. Sélectionner les fichiers à traduire',
     'files_label':'Fichiers',
@@ -2869,6 +2899,9 @@ UI_TEXT = {
     'genre_3':'Commerce & Économie','genre_4':'Film & Scénario','genre_5':'Document général (défaut)',
     'tone_0':'Narratif (courant)','tone_1':'Formel (soutenu)',
     'bilingual_0':'Traduction (Original)','bilingual_1':'Original (Traduction)',
+    'output_format_label':'Format du fichier de sortie','output_format_0':'Identique à la source (par défaut)','output_format_1':'TXT (texte brut)',
+    'range_label':'Traduire une plage (PDF : pages / EPUB : numéros de chapitre · TXT toujours traduit en entier · vide = tout)','range_start':'Début','range_end':'Fin',
+    'err_range_invalid':'Plage invalide. Saisissez des entiers supérieurs ou égaux à 1 ; le début ne peut pas dépasser la fin.','status_total_pages':'{n} pages au total','status_total_chapters':'{n} chapitres au total',
     'glossary_title':'✨ Glossaire',
     'btn_glossary_extract':'🔍 Extraction auto par IA',
     'glossary_label':'Glossaire (format source: traduction, un par ligne)',
@@ -2947,7 +2980,7 @@ UI_TEXT = {
     'glossary_cleared':'Glossaire effacé.',
 },
 'it': {
-    'app_title': "Traduttore multilingue IA <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "Traduttore multilingue IA <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Fase 1','step2':'Fase 2','step3':'Fase 3','step4':'Fase 4','status_tab':'Stato',
     'step1_title':'1. Seleziona i file da tradurre',
     'files_label':'File',
@@ -2974,6 +3007,9 @@ UI_TEXT = {
     'genre_3':'Business ed Economia','genre_4':'Film e Sceneggiatura','genre_5':'Documento Generale (predefinito)',
     'tone_0':'Narrativo (corrente)','tone_1':'Formale (sostenuto)',
     'bilingual_0':'Traduzione (Originale)','bilingual_1':'Originale (Traduzione)',
+    'output_format_label':'Formato del file di output','output_format_0':"Come l'originale (predefinito)",'output_format_1':'TXT (testo semplice)',
+    'range_label':'Traduci un intervallo (PDF: pagine / EPUB: numeri di capitolo · il TXT viene sempre tradotto per intero · vuoto = tutto)','range_start':'Inizio','range_end':'Fine',
+    'err_range_invalid':"Intervallo non valido. Inserisci numeri interi da 1 in su; l'inizio non può superare la fine.",'status_total_pages':'{n} pagine in totale','status_total_chapters':'{n} capitoli in totale',
     'glossary_title':'✨ Glossario',
     'btn_glossary_extract':'🔍 Estrazione auto termini IA',
     'glossary_label':'Glossario (formato sorgente: traduzione, uno per riga)',
@@ -3052,7 +3088,7 @@ UI_TEXT = {
     'glossary_cleared':'Glossario cancellato.',
 },
 'nl': {
-    'app_title': "AI meertalige vertaler <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI meertalige vertaler <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Stap 1','step2':'Stap 2','step3':'Stap 3','step4':'Stap 4','status_tab':'Status',
     'step1_title':'1. Selecteer te vertalen bestanden',
     'files_label':'Bestanden',
@@ -3079,6 +3115,9 @@ UI_TEXT = {
     'genre_3':'Zakelijk & Economie','genre_4':'Film & Script','genre_5':'Algemeen document (standaard)',
     'tone_0':'Verhalend (gewoon)','tone_1':'Formeel (beleefd)',
     'bilingual_0':'Vertaling (Origineel)','bilingual_1':'Origineel (Vertaling)',
+    'output_format_label':'Uitvoerbestandsformaat','output_format_0':'Zelfde als bron (standaard)','output_format_1':'TXT (platte tekst)',
+    'range_label':"Een bereik vertalen (PDF: pagina's / EPUB: hoofdstuknummers · TXT wordt altijd volledig vertaald · leeg = alles)",'range_start':'Begin','range_end':'Einde',
+    'err_range_invalid':'Ongeldig bereik. Voer gehele getallen van 1 of hoger in; het begin mag niet groter zijn dan het einde.','status_total_pages':"{n} pagina's in totaal",'status_total_chapters':'{n} hoofdstukken in totaal',
     'glossary_title':'✨ Woordenlijst',
     'btn_glossary_extract':'🔍 AI automatische termijnextractie',
     'glossary_label':'Woordenlijst (bron: vertaling formaat, één per regel)',
@@ -3157,7 +3196,7 @@ UI_TEXT = {
     'glossary_cleared':'Woordenlijst gewist.',
 },
 'da': {
-    'app_title': "AI flersproget oversætter <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI flersproget oversætter <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Trin 1','step2':'Trin 2','step3':'Trin 3','step4':'Trin 4','status_tab':'Status',
     'step1_title':'1. Vælg filer til oversættelse',
     'files_label':'Filer',
@@ -3184,6 +3223,9 @@ UI_TEXT = {
     'genre_3':'Business & Økonomi','genre_4':'Film & Manuskript','genre_5':'Generelt dokument (standard)',
     'tone_0':'Fortællende (almindelig)','tone_1':'Formel (høflig)',
     'bilingual_0':'Oversættelse (Original)','bilingual_1':'Original (Oversættelse)',
+    'output_format_label':'Outputfilformat','output_format_0':'Samme som kilden (standard)','output_format_1':'TXT (almindelig tekst)',
+    'range_label':'Oversæt et interval (PDF: sider / EPUB: kapitelnumre · TXT oversættes altid helt · tom = alt)','range_start':'Start','range_end':'Slut',
+    'err_range_invalid':'Ugyldigt interval. Angiv heltal på 1 eller derover; start må ikke være større end slut.','status_total_pages':'{n} sider i alt','status_total_chapters':'{n} kapitler i alt',
     'glossary_title':'✨ Ordliste',
     'btn_glossary_extract':'🔍 AI automatisk termudtrækning',
     'glossary_label':'Ordliste (kilde: oversættelse format, én per linje)',
@@ -3262,7 +3304,7 @@ UI_TEXT = {
     'glossary_cleared':'Ordliste ryddet.',
 },
 'sv': {
-    'app_title': "AI flerspråkig översättare <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI flerspråkig översättare <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Steg 1','step2':'Steg 2','step3':'Steg 3','step4':'Steg 4','status_tab':'Status',
     'step1_title':'1. Välj filer att översätta',
     'files_label':'Filer',
@@ -3289,6 +3331,9 @@ UI_TEXT = {
     'genre_3':'Affärer & Ekonomi','genre_4':'Film & Manus','genre_5':'Allmänt dokument (standard)',
     'tone_0':'Berättande (vardaglig)','tone_1':'Formell (artig)',
     'bilingual_0':'Översättning (Original)','bilingual_1':'Original (Översättning)',
+    'output_format_label':'Utdatafilformat','output_format_0':'Samma som källan (standard)','output_format_1':'TXT (oformaterad text)',
+    'range_label':'Översätt ett intervall (PDF: sidor / EPUB: kapitelnummer · TXT översätts alltid helt · tomt = allt)','range_start':'Start','range_end':'Slut',
+    'err_range_invalid':'Ogiltigt intervall. Ange heltal från 1 och uppåt; start får inte vara större än slut.','status_total_pages':'{n} sidor totalt','status_total_chapters':'{n} kapitel totalt',
     'glossary_title':'✨ Ordlista',
     'btn_glossary_extract':'🔍 AI automatisk termextraktion',
     'glossary_label':'Ordlista (källterm: översättning format, en per rad)',
@@ -3367,7 +3412,7 @@ UI_TEXT = {
     'glossary_cleared':'Ordlista rensad.',
 },
 'no': {
-    'app_title': "AI flerspråklig oversetter <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "AI flerspråklig oversetter <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'Trinn 1','step2':'Trinn 2','step3':'Trinn 3','step4':'Trinn 4','status_tab':'Status',
     'step1_title':'1. Velg filer som skal oversettes',
     'files_label':'Filer',
@@ -3394,6 +3439,9 @@ UI_TEXT = {
     'genre_3':'Forretning & Økonomi','genre_4':'Film & Manus','genre_5':'Generelt dokument (standard)',
     'tone_0':'Fortellende (vanlig)','tone_1':'Formell (høflig)',
     'bilingual_0':'Oversettelse (Original)','bilingual_1':'Original (Oversettelse)',
+    'output_format_label':'Utdatafilformat','output_format_0':'Samme som kilden (standard)','output_format_1':'TXT (ren tekst)',
+    'range_label':'Oversett et intervall (PDF: sider / EPUB: kapittelnumre · TXT oversettes alltid helt · tomt = alt)','range_start':'Start','range_end':'Slutt',
+    'err_range_invalid':'Ugyldig intervall. Oppgi heltall på 1 eller høyere; start kan ikke være større enn slutt.','status_total_pages':'{n} sider totalt','status_total_chapters':'{n} kapitler totalt',
     'glossary_title':'✨ Ordliste',
     'btn_glossary_extract':'🔍 AI automatisk termuttrekking',
     'glossary_label':'Ordliste (kilde: oversettelse format, én per linje)',
@@ -3472,7 +3520,7 @@ UI_TEXT = {
     'glossary_cleared':'Ordliste tømt.',
 },
 'ar': {
-    'app_title': "مترجم متعدد اللغات بالذكاء الاصطناعي <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "مترجم متعدد اللغات بالذكاء الاصطناعي <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'الخطوة 1','step2':'الخطوة 2','step3':'الخطوة 3','step4':'الخطوة 4','status_tab':'الحالة',
     'step1_title':'1. اختر الملفات للترجمة',
     'files_label':'الملفات',
@@ -3499,6 +3547,9 @@ UI_TEXT = {
     'genre_3':'الأعمال والاقتصاد','genre_4':'الأفلام والنصوص','genre_5':'وثيقة عامة (افتراضي)',
     'tone_0':'سردي (عادي)','tone_1':'رسمي (مهذب)',
     'bilingual_0':'الترجمة (الأصل)','bilingual_1':'الأصل (الترجمة)',
+    'output_format_label':'تنسيق ملف الإخراج','output_format_0':'نفس المصدر (افتراضي)','output_format_1':'TXT (نص عادي)',
+    'range_label':'ترجمة نطاق محدد (PDF: الصفحات / EPUB: أرقام الفصول · يُترجم TXT بالكامل دائمًا · اتركه فارغًا للكل)','range_start':'البداية','range_end':'النهاية',
+    'err_range_invalid':'النطاق غير صالح. أدخل أعدادًا صحيحة 1 فأكثر، ولا يمكن أن تكون البداية أكبر من النهاية.','status_total_pages':'الإجمالي {n} صفحة','status_total_chapters':'الإجمالي {n} فصل',
     'glossary_title':'✨ قاموس المصطلحات',
     'btn_glossary_extract':'🔍 استخراج تلقائي للمصطلحات بالذكاء الاصطناعي',
     'glossary_label':'قاموس المصطلحات (تنسيق المصدر: الترجمة، سطر واحد لكل مصطلح)',
@@ -3577,7 +3628,7 @@ UI_TEXT = {
     'glossary_cleared':'تم مسح قاموس المصطلحات.',
 },
 'fa': {
-    'app_title': "مترجم چندزبانه هوش مصنوعی <span style='color:red;'><a href='https://github.com/vEduardovich/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
+    'app_title': "مترجم چندزبانه هوش مصنوعی <span style='color:red;'><a href='https://github.com/choco6-git/dodari' target='_blank' style='text-decoration:none;color:red;'>Dodari2</a></span>",
     'step1':'مرحله ۱','step2':'مرحله ۲','step3':'مرحله ۳','step4':'مرحله ۴','status_tab':'وضعیت',
     'step1_title':'۱. فایل‌های مورد نظر را انتخاب کنید',
     'files_label':'فایل‌ها',
@@ -3604,6 +3655,9 @@ UI_TEXT = {
     'genre_3':'کسب‌وکار و اقتصاد','genre_4':'فیلم و فیلمنامه','genre_5':'سند عمومی (پیش‌فرض)',
     'tone_0':'روایی (معمولی)','tone_1':'رسمی (مؤدبانه)',
     'bilingual_0':'ترجمه (متن اصلی)','bilingual_1':'متن اصلی (ترجمه)',
+    'output_format_label':'قالب فایل خروجی','output_format_0':'مانند منبع (پیش\u200cفرض)','output_format_1':'TXT (متن ساده)',
+    'range_label':'ترجمه بازه\u200cای (PDF: صفحه\u200cها / EPUB: شماره فصل\u200cها · TXT همیشه کامل ترجمه می\u200cشود · خالی = همه)','range_start':'شروع','range_end':'پایان',
+    'err_range_invalid':'بازه نامعتبر است. عدد صحیح 1 یا بیشتر وارد کنید؛ شروع نمی\u200cتواند از پایان بزرگ\u200cتر باشد.','status_total_pages':'مجموعاً {n} صفحه','status_total_chapters':'مجموعاً {n} فصل',
     'glossary_title':'✨ واژه‌نامه',
     'btn_glossary_extract':'🔍 استخراج خودکار اصطلاحات توسط هوش مصنوعی',
     'glossary_label':'واژه‌نامه (فرمت مبدا: ترجمه، یک در هر خط)',
@@ -4570,6 +4624,106 @@ def _dodari_epub_original_texts(epub_path, folder, html_files):
             archive.close()
     return texts
 
+_TXT_PARA_TAGS = ('p', 'div', 'section', 'article', 'blockquote', 'figcaption', 'pre',
+                  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table')
+_TXT_LINE_TAGS = ('li', 'tr', 'dt', 'dd')
+_TXT_PRE_MARK = '⁣'
+
+def _dodari_html_to_text(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    for tag in soup(['script', 'style', 'head']):
+        tag.decompose()
+    for node in soup.find_all(string=lambda s: type(s) is not NavigableString):
+        node.extract()
+    for pre in soup.find_all('pre'):
+        body = pre.get_text()
+        pre.clear()
+        pre.append(NavigableString('\n'.join(_TXT_PRE_MARK + ln for ln in body.split('\n'))))
+    for node in soup.find_all(string=True):
+        if node.find_parent('pre') is None:
+            node.replace_with(NavigableString(re.sub(r'\s+', ' ', str(node))))
+    for br in soup.find_all('br'):
+        br.replace_with(NavigableString('\n'))
+    for tag in soup.find_all(_TXT_PARA_TAGS + _TXT_LINE_TAGS):
+        gap = '\x02' if tag.name in _TXT_LINE_TAGS else '\x01'
+        tag.insert_before(NavigableString(gap))
+        tag.insert_after(NavigableString(gap))
+    text = soup.get_text()
+    text = re.sub(r'[\x01\x02]+', lambda m: '\n\n' if '\x01' in m.group(0) else '\n', text)
+    text = '\n'.join(ln.strip() for ln in text.split('\n'))
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text.replace(_TXT_PRE_MARK, '')
+
+def _dodari_epub_to_txt(epub_path, txt_path):
+    book = epub.read_epub(epub_path)
+    docs = []
+    for entry in book.spine:
+        item = book.get_item_with_id(entry[0] if isinstance(entry, (tuple, list)) else entry)
+        if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT and not isinstance(item, epub.EpubNav):
+            docs.append(item)
+    if not docs:
+        docs = [i for i in book.get_items_of_type(ebooklib.ITEM_DOCUMENT) if not isinstance(i, epub.EpubNav)]
+    chapters = [t for t in (_dodari_html_to_text(d.get_content()) for d in docs) if t]
+    with open(txt_path, 'w', encoding='utf-8') as fp:
+        fp.write('\n\n'.join(chapters) + '\n')
+
+def _dodari_parse_range(start, end):
+    def conv(value):
+        if value is None or value == '' or value == 0:
+            return None
+        number = float(value)
+        if number != int(number) or number < 1:
+            raise ValueError(value)
+        return int(number)
+    first, last = conv(start), conv(end)
+    if first is not None and last is not None and first > last:
+        raise ValueError((start, end))
+    return first, last
+
+def _dodari_resolve_range(page_range, total):
+    first = page_range[0] or 1
+    last = min(page_range[1] or total, total)
+    return (first, last) if first <= last else None
+
+def _dodari_page_chunks(first, last, size):
+    return [(s, min(s + size - 1, last)) for s in range(first, last + 1, size)]
+
+def _dodari_epub_spine_docs(epub_path):
+    import posixpath
+    from urllib.parse import unquote
+    with zipfile.ZipFile(epub_path, 'r') as zf:
+        container = BeautifulSoup(zf.read('META-INF/container.xml'), 'html.parser')
+        opf_name = container.find('rootfile')['full-path']
+        opf = BeautifulSoup(zf.read(opf_name), 'html.parser')
+    base = posixpath.dirname(opf_name)
+    manifest = {i.get('id'): i for i in opf.find_all('item')}
+    docs = []
+    for ref in opf.find_all('itemref'):
+        item = manifest.get(ref.get('idref'))
+        if item is None or 'nav' in (item.get('properties') or '').split():
+            continue
+        if item.get('media-type') not in ('application/xhtml+xml', 'text/html'):
+            continue
+        docs.append(posixpath.normpath(posixpath.join(base, unquote((item.get('href') or '').split('#')[0]))))
+    return docs
+
+def _dodari_epub_trim_spine(opf_path, folder, dropped_docs):
+    from urllib.parse import unquote
+    dropped = {os.path.normpath(os.path.join(folder, d)) for d in dropped_docs}
+    with open(opf_path, 'r', encoding='utf-8') as fp:
+        soup = BeautifulSoup(fp.read(), 'html.parser')
+    opf_dir = os.path.dirname(opf_path)
+    manifest = {i.get('id'): i for i in soup.find_all('item')}
+    for ref in soup.find_all('itemref'):
+        item = manifest.get(ref.get('idref'))
+        if item is None:
+            continue
+        target = os.path.normpath(os.path.join(opf_dir, unquote((item.get('href') or '').split('#')[0])))
+        if target in dropped:
+            ref.decompose()
+    with open(opf_path, 'w', encoding='utf-8') as fp:
+        fp.write(str(soup))
+
 _DODARI_JOB = {
     'state': 'idle',
     'message': '',
@@ -4855,6 +5009,7 @@ class Dodari:
         self.kv_bits = 8
         self.temperature = 1
         self.is_translating = False
+        self.last_run = None
         self.selected_files = []
         self.upload_msg = None
         self.origin_lang_str = None
@@ -4952,6 +5107,9 @@ class Dodari:
     def _bilingual_choices(self):
         return [(self._T(f'bilingual_{i}'), BILINGUAL_CHOICES_KO[i]) for i in range(len(BILINGUAL_CHOICES_KO))]
 
+    def _output_format_choices(self):
+        return [(self._T(f'output_format_{i}'), OUTPUT_FORMAT_CHOICES_KO[i]) for i in range(len(OUTPUT_FORMAT_CHOICES_KO))]
+
     def _lang_choices(self):
         disp = LANG_DISPLAY_BY_UI.get(self.ui_lang, LANG_DISPLAY_BY_UI['en'])
         return [(disp[ko], ko) for ko in SUPPORTED_LANGUAGES]
@@ -4973,7 +5131,7 @@ class Dodari:
             T = lambda k: UI_TEXT.get(lc, UI_TEXT['en']).get(k, UI_TEXT['en'].get(k, k))
             return (
                 f"<div style='text-align:center;width:100%;'>"
-                f"<a href='https://github.com/vEduardovich/dodari' target='_blank' style='display:inline-block;'>"
+                f"<a href='https://github.com/choco6-git/dodari' target='_blank' style='display:inline-block;'>"
                 f"<img src='{img_src}' style='display:block;margin:0 auto;width:100px;'></a>"
                 f"<h1 style='margin-top:10px;'>{T('app_title')}</h1>"
                 f"</div>"
@@ -5061,6 +5219,15 @@ class Dodari:
                             value='번역문(원문)',
                             label=self._T('bilingual_label')
                         )
+                        self.output_format_radio = gr.Radio(
+                            choices=self._output_format_choices(),
+                            value=OUTPUT_FORMAT_CHOICES_KO[0],
+                            label=self._T('output_format_label')
+                        )
+                        self.range_label_md = gr.Markdown(f"<p style='font-size:0.9em;margin:4px 0;'>{self._T('range_label')}</p>")
+                        with gr.Row():
+                            self.range_start_num = gr.Number(label=self._T('range_start'), value=None, precision=0)
+                            self.range_end_num = gr.Number(label=self._T('range_end'), value=None, precision=0)
                         self.genre_radio = gr.Radio(
                             choices=self._genre_choices(),
                             label=self._T('genre_label'),
@@ -5070,6 +5237,10 @@ class Dodari:
                             choices=self._tone_choices(),
                             value='서술체 (~다)',
                             label=self._T('tone_label')
+                        )
+                        self.natural_ko_chk = gr.Checkbox(
+                            value=True,
+                            label=self._T('natural_ko_label')
                         )
 
                         with gr.Accordion(self._T('glossary_title'), open=False) as glossary_accordion:
@@ -5283,7 +5454,7 @@ class Dodari:
                             )
                             translate_btn.click(
                                 fn=self.execute_translation_pipeline,
-                                inputs=[self.genre_radio, self.tone_radio, self.target_lang_radio, self.bilingual_order_radio],
+                                inputs=[self.genre_radio, self.tone_radio, self.target_lang_radio, self.bilingual_order_radio, self.output_format_radio, self.range_start_num, self.range_end_num, self.natural_ko_chk],
                                 outputs=[done_files, run_state]
                             ).then(
                                 fn=self.on_translate_finished,
@@ -5337,8 +5508,13 @@ class Dodari:
                     gr.update(value=f"<p style='color:#888;font-size:0.85em;'>{T('cli_notice')}</p>"),
                     gr.update(label=T('step3')),
                     gr.update(label=T('bilingual_label'), choices=self._bilingual_choices()),
+                    gr.update(label=T('output_format_label'), choices=self._output_format_choices()),
+                    gr.update(value=f"<p style='font-size:0.9em;margin:4px 0;'>{T('range_label')}</p>"),
+                    gr.update(label=T('range_start')),
+                    gr.update(label=T('range_end')),
                     gr.update(label=T('genre_label'), choices=self._genre_choices()),
                     gr.update(label=T('tone_label'), choices=self._tone_choices()),
+                    gr.update(label=T('natural_ko_label')),
                     gr.update(label=T('glossary_title')),
                     gr.update(value=T('btn_glossary_extract')),
                     gr.update(label=T('glossary_label'), placeholder=T('glossary_placeholder')),
@@ -5362,8 +5538,9 @@ class Dodari:
             _live_outputs = [
                 title_html, tab1, step1_html, input_window,
                 self.origin_lang_display, tab2, self.target_lang_radio, engine_html,
-                self.model_radio, self.cli_model_dd, self.cli_effort_dd, cli_notice_md, tab3, self.bilingual_order_radio, self.genre_radio,
-                self.tone_radio, glossary_accordion, glossary_extract_btn,
+                self.model_radio, self.cli_model_dd, self.cli_effort_dd, cli_notice_md, tab3, self.bilingual_order_radio, self.output_format_radio,
+                self.range_label_md, self.range_start_num, self.range_end_num, self.genre_radio,
+                self.tone_radio, self.natural_ko_chk, glossary_accordion, glossary_extract_btn,
                 self.glossary_textbox, glossary_apply_btn, glossary_clear_btn,
                 self.glossary_count_md, glossary_desc_md, tab4, translate_btn,
                 status_tab, done_files,
@@ -5388,6 +5565,7 @@ class Dodari:
         self.app.queue().launch(
             share=False,
             inbrowser=True,
+            server_name="0.0.0.0",
             favicon_path='imgs/dodari.png',
             allowed_paths=['./outputs']
         )
@@ -5635,7 +5813,8 @@ class Dodari:
         _dodari_job_error(message)
         return None, message
 
-    def execute_translation_pipeline(self, genre_val, tone_val="서술체 (~다)", target_lang_name="한국어", bilingual_order_val="번역문(원문)", progress=gr.Progress()):
+    def execute_translation_pipeline(self, genre_val, tone_val="서술체 (~다)", target_lang_name="한국어", bilingual_order_val="번역문(원문)", output_format_val="원본과 동일", range_start=None, range_end=None, natural_ko=False, progress=gr.Progress()):
+        self.natural_ko = bool(natural_ko)
         if not self.selected_files:
             return None, f"<p style='color:red;'>{self._T('err_file_none')}</p>"
 
@@ -5736,6 +5915,12 @@ class Dodari:
         if self.origin_lang == target_iso:
             return self._abort_pipeline(f"<p style='color:red;'>{self._T('err_lang_same').format(lang=target_lang_name)}</p>")
 
+        try:
+            page_range = _dodari_parse_range(range_start, range_end)
+        except (ValueError, TypeError):
+            return self._abort_pipeline(f"<p style='color:red;'>{self._T('err_range_invalid')}</p>")
+        range_active = page_range != (None, None)
+
         origin_abb = self.origin_lang
         target_abb = target_iso
         self._job_cfg = self._snapshot_job_cfg()
@@ -5758,6 +5943,7 @@ class Dodari:
             _dodari_job_units([], '')
             name, ext = os.path.splitext(file['orig_name'])
             ext = ext.lower()
+            out_name = name
             file_start_time = time.time()
             _dodari_stats_reset()
 
@@ -5772,10 +5958,16 @@ class Dodari:
                 'glossary_hash': job_glossary_hash,
                 'pipeline': RESUME_PIPELINE_VERSION,
             }
+            if target_abb == 'ko':
+                resume_settings['proper_noun_orig'] = True
+                if self.natural_ko:
+                    resume_settings['natural_ko'] = True
             if 'epub' in ext:
                 resume_settings['model'] = f"{resume_settings['model']}|{EPUB_UNIT_FORMAT}"
             elif ext == '.pdf':
                 resume_settings['model'] = f"{resume_settings['model']}|{PDF_UNIT_FORMAT}"
+            if range_active and ('epub' in ext or ext == '.pdf'):
+                resume_settings['model'] = f"{resume_settings['model']}|range={page_range[0] or ''}-{page_range[1] or ''}"
             resume_base = _dodari_resume_temp_basename(file['orig_name'], resume_settings)
             self.temp_folder_1 = _dodari_resume_temp_folder(resume_base, 1)
             self.temp_folder_2 = _dodari_resume_temp_folder(resume_base, 2)
@@ -5834,6 +6026,26 @@ class Dodari:
                     shutil.copyfile(opf_file, opf_file_2)
 
                 file_path = self.list_epub_html_files()
+                if range_active:
+                    try:
+                        spine_docs = _dodari_epub_spine_docs(file['path'])
+                        resolved = _dodari_resolve_range(page_range, len(spine_docs))
+                        reason = None if resolved else f'chapter range outside document ({len(spine_docs)} chapters)'
+                    except Exception as err:
+                        resolved, reason = None, f'could not read EPUB chapter order ({err})'
+                    if resolved is None:
+                        print(f'[EPUB] {reason}, skipping file: {file["orig_name"]}')
+                        pipeline_failures.append(_dodari_pipeline_failure_entry(file['orig_name'], reason))
+                        self._record_file_time(file_times, f'{name}{ext}', file_start_time, False)
+                        continue
+                    kept = {os.path.normpath(os.path.join(self.temp_folder_1, d)) for d in spine_docs[resolved[0] - 1:resolved[1]]}
+                    file_path = [h for h in file_path if os.path.normpath(h) in kept]
+                    dropped = spine_docs[:resolved[0] - 1] + spine_docs[resolved[1]:]
+                    for _opf, _folder in ((opf_file, self.temp_folder_1), (opf_file_2, self.temp_folder_2)):
+                        if os.path.isfile(_opf):
+                            _dodari_epub_trim_spine(_opf, _folder, dropped)
+                    out_name = f'{name}_ch{resolved[0]}-{resolved[1]}'
+                    print(f'[EPUB] Chapter range {resolved[0]}-{resolved[1]} of {len(spine_docs)}')
                 print('File count: ', len(file_path))
                 epub_code_classes = _dodari_epub_folder_code_classes(self.temp_folder_1)
                 print(f'[EPUB] Monospace (code) classes from CSS: {sorted(epub_code_classes)[:20]}')
@@ -5985,15 +6197,14 @@ class Dodari:
 
                 os.makedirs(self.output_folder, exist_ok=True)
                 if bilingual_order_val == "원문(번역문)":
-                    done_path_1 = os.path.join(self.output_folder, "{name}_{t2}({t3}){ext}".format(name=name, t2=origin_abb, t3=target_abb, ext=ext))
+                    done_path_1 = os.path.join(self.output_folder, "{name}_{t2}({t3}){ext}".format(name=out_name, t2=origin_abb, t3=target_abb, ext=ext))
                 else:
-                    done_path_1 = os.path.join(self.output_folder, "{name}_{t2}({t3}){ext}".format(name=name, t2=target_abb, t3=origin_abb, ext=ext))
-                done_path_2 = os.path.join(self.output_folder, "{name}_{t2}{ext}".format(name=name, t2=target_abb, ext=ext))
-
-                all_file_path.extend([done_path_1, done_path_2])
+                    done_path_1 = os.path.join(self.output_folder, "{name}_{t2}({t3}){ext}".format(name=out_name, t2=target_abb, t3=origin_abb, ext=ext))
+                done_path_2 = os.path.join(self.output_folder, "{name}_{t2}{ext}".format(name=out_name, t2=target_abb, ext=ext))
 
                 shutil.move(f'{self.temp_folder_1}.epub', done_path_1)
                 shutil.move(f'{self.temp_folder_2}.epub', done_path_2)
+                all_file_path.extend(self._maybe_convert_to_txt([done_path_1, done_path_2], output_format_val))
 
                 if self._finish_file_stats(file_summaries, f'{name}{ext}'):
                     print(f'[Resume] Partial result — keeping resume folders for a rerun: {self.temp_folder_1}, {self.temp_folder_2}')
@@ -6053,12 +6264,19 @@ class Dodari:
                     print(f'[PDF] Text layer: {"yes" if _pdf_text_layer else "no"}{_scan_note} — OCR is decided per 50-page section')
                     print(f'[PDF] Meta — title: {_pdf_meta.get("title","")}, author: {_pdf_meta.get("author","")}')
 
+                    pdf_first, pdf_last = 0, total_pages - 1
+                    if range_active:
+                        resolved = _dodari_resolve_range(page_range, total_pages)
+                        if resolved is None:
+                            raise ValueError(f'page range outside document ({total_pages} pages)')
+                        pdf_first, pdf_last = resolved[0] - 1, resolved[1] - 1
+                        out_name = f'{name}_p{resolved[0]}-{resolved[1]}'
+                        print(f'[PDF] Page range {resolved[0]}-{resolved[1]} of {total_pages}')
+
                     CHUNK_SIZE = 50
-                    chunk_ranges = [
-                        (s, min(s + CHUNK_SIZE - 1, total_pages - 1))
-                        for s in range(0, total_pages, CHUNK_SIZE)
-                    ]
+                    chunk_ranges = _dodari_page_chunks(pdf_first, pdf_last, CHUNK_SIZE)
                     num_chunks = len(chunk_ranges)
+                    pdf_split = num_chunks > 1 or (pdf_first, pdf_last) != (0, total_pages - 1)
                     print(f'[PDF] Split into {num_chunks} chunks (max {CHUNK_SIZE} pages each)')
                     _dodari_job_units([end - start + 1 for start, end in chunk_ranges], 'section')
 
@@ -6071,10 +6289,10 @@ class Dodari:
                         _pdfium_ok = False
 
                     if bilingual_order_val == "원문(번역문)":
-                        done_path_1 = os.path.join(self.output_folder, f"{name}_{origin_abb}({target_abb}).epub")
+                        done_path_1 = os.path.join(self.output_folder, f"{out_name}_{origin_abb}({target_abb}).epub")
                     else:
-                        done_path_1 = os.path.join(self.output_folder, f"{name}_{target_abb}({origin_abb}).epub")
-                    done_path_2 = os.path.join(self.output_folder, f"{name}_{target_abb}.epub")
+                        done_path_1 = os.path.join(self.output_folder, f"{out_name}_{target_abb}({origin_abb}).epub")
+                    done_path_2 = os.path.join(self.output_folder, f"{out_name}_{target_abb}.epub")
 
                     book_1, css_1 = self._init_epub_book(name, target_abb)
                     book_2, css_2 = self._init_epub_book(name, target_abb)
@@ -6132,7 +6350,7 @@ class Dodari:
                             if _struct_cached is None:
                                 print(f'\n[PDF chunk] {chunk_label} Docling conversion started')
 
-                                if num_chunks > 1:
+                                if pdf_split:
                                     chunk_pdf_path = os.path.join(
                                         self.output_folder, f'_dodari_chunk_{chunk_no}.pdf'
                                     )
@@ -6332,7 +6550,7 @@ class Dodari:
                                 html_content = '<html><body>' + (body_match.group(1) if body_match else chunk_html) + '</body></html>'
                                 del result, converter, chunk_html
                                 gc.collect()
-                                if num_chunks > 1 and conv_path != file['path'] and os.path.exists(conv_path):
+                                if pdf_split and conv_path != file['path'] and os.path.exists(conv_path):
                                     os.remove(conv_path)
                                 print(f'[PDF chunk] {chunk_label} Docling done — HTML {len(html_content):,} chars')
 
@@ -6511,7 +6729,7 @@ class Dodari:
                     self._finalize_epub_book(book_1, chapters_1, done_path_1, name)
                     self._finalize_epub_book(book_2, chapters_2, done_path_2, name)
 
-                    all_file_path.extend([done_path_1, done_path_2])
+                    all_file_path.extend(self._maybe_convert_to_txt([done_path_1, done_path_2], output_format_val))
                     print(f'[PDF] Success! EPUB created: {done_path_1}, {done_path_2}')
                     if self._finish_file_stats(file_summaries, f'{name}{ext}'):
                         print(f'[Resume] Partial result — keeping resume folder for a rerun: {self.temp_folder_1}')
@@ -6600,6 +6818,11 @@ class Dodari:
             'partial_files': sorted(_f for _f, _s in file_summaries.items() if _s.get('partial')),
             'outputs': list(all_file_path),
         })
+        self.last_run = {
+            'files': [{'name': _f, 'elapsed': _e, 'ok': _ok} for _f, _e, _ok in file_times],
+            'failures': [{'file': _f, 'reason': _html_unescape(_r)} for _f, _r in pipeline_failures],
+            'outputs': list(all_file_path),
+        }
 
         failure_ok, failure_msg = _dodari_pipeline_failure_summary(
             pipeline_failures, success_count, self._T
@@ -6655,16 +6878,17 @@ class Dodari:
         lang = self._job_value('target_lang')
 
         if lang == 'ko':
+            natural = KO_PROPER_NOUN_STYLE + (KO_NATURAL_STYLE if getattr(self, 'natural_ko', False) else "")
             if is_formal:
                 return (
                     "모든 나레이션은 반드시 정중한 경어체(~합니다/~입니다)로 종결하십시오. "
                     "단, 대화문은 원문의 캐릭터 뉘앙스를 살려 자연스럽게 번역하십시오. "
-                )
+                ) + natural
             else:
                 return (
                     "모든 나레이션(서술 및 묘사)은 반드시 격식 있는 서술체(~다/~라)로 종결하십시오. "
                     "단, 큰따옴표(\" \") 내의 대화문은 캐릭터 간의 관계와 상황에 맞는 자연스러운 어투(존댓말, 반말 등)를 유지하십시오. "
-                )
+                ) + natural
 
         elif lang == 'ja':
             if is_formal:
@@ -7405,6 +7629,7 @@ class Dodari:
                     continue
 
                 print(f'[Chunk] Translating {c_idx + 1}/{total_chunks} ({len(chunk)} sentences)')
+                _chunk_start = time.time()
                 if progress is not None:
                     _el = int(time.time() - self.start) if self.start else 0
                     progress(0.7, desc=f'[Chunk] {c_idx + 1}/{total_chunks} translating... (elapsed: {format_korean_time(_el)})')
@@ -7428,6 +7653,9 @@ class Dodari:
                     _dodari_resume_mark_done(resume_folder, source_name, resume_settings, resume_done, chunk_key)
                 translated_all.extend(chunk_translated)
                 self._batch_base += chunk_batches[c_idx]
+                _total_el = time.time() - self.start if self.start else time.time() - _chunk_start
+                print(f'[Chunk] Done {c_idx + 1}/{total_chunks} in {timedelta(seconds=int(time.time() - _chunk_start))} '
+                      f'(total elapsed {timedelta(seconds=int(_total_el))})', flush=True)
         finally:
             self._batch_base = 0
             self._batch_span = 0
@@ -7495,9 +7723,14 @@ class Dodari:
             print(f"Inferred genre: {inferred_genre}")
 
             _is_image_only_warning = False
+            _total_info = ''
 
             if '.epub' in ext:
                 file = epub.read_epub(aBook['path'])
+                try:
+                    _total_info = self._T('status_total_chapters').format(n=len(_dodari_epub_spine_docs(aBook['path'])))
+                except Exception as _te:
+                    print(f'[EPUB] Chapter count unavailable: {_te}')
 
                 _total_words = 0
                 _has_image = False
@@ -7540,6 +7773,7 @@ class Dodari:
                 try:
                     if FITZ_AVAILABLE:
                         doc = fitz.open(aBook['path'])
+                        _total_info = self._T('status_total_pages').format(n=len(doc))
                         text = doc[0].get_text() if len(doc) > 0 else ''
                         doc.close()
                         if text.strip():
@@ -7592,6 +7826,8 @@ class Dodari:
             self.user_glossary = {}
             _status_ready = self._T('status_ready').replace('\n', '<br>')
             _lang_msg = f"<p style='text-align:center;'><span style='color:skyblue;font-size:1.5em;'>{self._T('status_detected').format(lang=lang_info_display)}</span></p>"
+            if _total_info:
+                _lang_msg += f"<p style='text-align:center;color:gray;'>{_total_info}</p>"
             if _is_image_only_warning:
                 _lang_msg += f"<p style='text-align:center;color:red;'>{self._T('status_image_only')}</p>"
             yield f"<p>{_status_ready}</p>", obj[1], _lang_msg, inferred_genre, _td0, origin_dropdown_val, auto_target, '', _gc0, _bd0
@@ -8007,6 +8243,23 @@ class Dodari:
         book.add_item(epub.EpubNav())
         epub.write_epub(epub_path, book, {})
         print(f'[EPUB] Packaged: {epub_path}')
+
+    def _maybe_convert_to_txt(self, epub_paths, output_format_val):
+        if output_format_val != OUTPUT_FORMAT_CHOICES_KO[1]:
+            return list(epub_paths)
+        final_paths = []
+        for epub_path in epub_paths:
+            txt_path = os.path.splitext(epub_path)[0] + '.txt'
+            try:
+                _dodari_epub_to_txt(epub_path, txt_path)
+            except Exception as err:
+                print(f'[TXT] Conversion failed, keeping EPUB: {epub_path} ({err})')
+                final_paths.append(epub_path)
+                continue
+            os.remove(epub_path)
+            final_paths.append(txt_path)
+            print(f'[TXT] Plain text created: {txt_path}')
+        return final_paths
 
     def finalize_file_streams(self, book, output_file_1, output_file_2):
         book.close()

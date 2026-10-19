@@ -3,7 +3,7 @@
 <img src='https://github.com/user-attachments/assets/6b6a73f6-087c-439c-869f-5e0d0629db92' width='200px' height='200px' title='Dodari'/>
 <h1 align="center">Dodari 2</h1>
 <p align='center'>
-English | <a href='https://github.com/vEduardovich/dodari/blob/main/README.ko.md'>한국어</a> <br/>
+English | <a href='https://github.com/choco6-git/dodari/blob/main/README.ko.md'>한국어</a> <br/>
 Dodari 2 is a multilingual AI translator that translates <br/>EPUB, PDF, and TXT documents with genre-aware, context-sensitive accuracy.<br/>
 -------<br/>
 <span style='font-size:0.9em;'>*Successor to Dodari 1 (released March 2024)</span>
@@ -17,7 +17,7 @@ Dodari 2 is a multilingual AI translator that translates <br/>EPUB, PDF, and TXT
 
 1. Enter this prompt
 ```bash
-https://github.com/vEduardovich/dodari install Dodari
+https://github.com/choco6-git/dodari install Dodari
 ```
 2. If the AI asks for permission, "Allow"
 3. When the login window opens, sign in, then "Continue"
@@ -114,7 +114,7 @@ https://github.com/vEduardovich/dodari install Dodari
 ## Installation & Setup
 
 For beginners:
-1. Click <a href='https://github.com/vEduardovich/dodari/archive/refs/heads/main.zip' title='Download zip' style='text-align:center'>Download ZIP</a>
+1. Click <a href='https://github.com/choco6-git/dodari/archive/refs/heads/main.zip' title='Download zip' style='text-align:center'>Download ZIP</a>
 2. Extract the archive, then:
 - **Windows**: double-click `start_windows.bat`
 - **Mac**: run `sh start_mac.sh` in a terminal window
@@ -128,7 +128,7 @@ _If you encounter an error, delete the `dodari_env` folder and run the script ag
 For advanced users:
 
 ```bash
-git clone https://github.com/vEduardovich/dodari.git
+git clone https://github.com/choco6-git/dodari.git
 cd dodari
 ```
 - Windows: run `start_windows.bat`
@@ -146,6 +146,7 @@ The Claude (subscription CLI) engine translates with the Haiku model (`claude-ha
 dodari/
 ├── dodari_env         # Folder where runtime dependencies are installed
 ├── dodari.py          # Main application
+├── dodari_cli.py      # Command line version (for scripts and AI agents)
 ├── start_mac.sh       # Mac launch script
 ├── start_ubuntu.sh    # Ubuntu(vLLM) launch script
 ├── start_windows.bat  # Windows launch script
@@ -154,6 +155,24 @@ dodari/
 ├── ui_config.json     # Kept only so older installs update cleanly — do not edit
 └── requirements.txt   # Dependency list
 ```
+
+<br>
+
+## Command Line (for scripts and AI agents)
+
+`dodari_cli.py` runs the same translation as the web UI without opening a page. Progress logs go to stderr and stdout carries a single JSON result, so an AI agent can read it directly.
+
+```bash
+dodari_env/bin/python dodari_cli.py inspect book.pdf
+dodari_env/bin/python dodari_cli.py translate book.pdf --target ko --engine claude --effort medium \
+    --format txt --range 10-30 --output-dir ./outputs
+```
+
+- `inspect` translates nothing. It reports the detected source language, a genre guess and the total size (PDF: pages, EPUB: chapters), so you can pick a `--range`.
+- `--range` is PDF pages or EPUB chapter numbers (`10-30`, `10-`, `-30`). TXT is always translated in full.
+- `--format txt` saves EPUB/PDF results as plain text files. Without `--engine`, the engine currently selected in the web UI is used. `--genre`, `--tone`, `--bilingual-order`, `--source-lang` and `--model` are optional; see `--help`.
+- Exit codes: `0` all succeeded, `1` some failed, `2` invalid arguments, `3` could not start (for example the engine is not ready or the languages are the same), `130` interrupted.
+- Run the same command again to resume an interrupted translation. Large books take a long time, so run it in the background.
 
 <br>
 
@@ -269,8 +288,8 @@ Terminal: `[Dodari 1/7] Checking the programs Dodari needs…` → while install
 Terminal: `[Dodari 2/7] Downloading Dodari…` → `[Dodari 2/7] Download complete` (already there: `[Dodari 2/7] Dodari is already here`)
 
 - If the install folder already contains `dodari.py`, skip this step.
-- macOS / Linux: `git clone https://github.com/vEduardovich/dodari.git ~/dodari >> ~/dodari_install.log 2>&1`
-- Windows: `git clone https://github.com/vEduardovich/dodari.git "%USERPROFILE%\dodari" >> "%USERPROFILE%\dodari_install.log" 2>&1`
+- macOS / Linux: `git clone https://github.com/choco6-git/dodari.git ~/dodari >> ~/dodari_install.log 2>&1`
+- Windows: `git clone https://github.com/choco6-git/dodari.git "%USERPROFILE%\dodari" >> "%USERPROFILE%\dodari_install.log" 2>&1`
 
 ### 3. Save the settings **[outside workspace]**
 Terminal: `[Dodari 3/7] Saving settings…` → `[Dodari 3/7] Settings saved`

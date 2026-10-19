@@ -17,7 +17,7 @@
 
 1. 프롬프트 입력
 ```bash
-https://github.com/vEduardovich/dodari 도다리 설치해줘
+https://github.com/choco6-git/dodari 도다리 설치해줘
 ```
 2. AI가 허용을 물으면 "허용"
 3. 로그인 창이 뜨면 로그인 후 "계속"
@@ -115,7 +115,7 @@ https://github.com/vEduardovich/dodari 도다리 설치해줘
 ## 설치 및 실행
 
 초보자라면,
-1. <a href='https://github.com/vEduardovich/dodari/archive/refs/heads/main.zip' title='압축 파일 다운로드' style='text-align:center'>압축 파일 다운로드</a> 클릭
+1. <a href='https://github.com/choco6-git/dodari/archive/refs/heads/main.zip' title='압축 파일 다운로드' style='text-align:center'>압축 파일 다운로드</a> 클릭
 2. 압축해제 후 
 - 윈도우 사용자는 `start_windows.bat` 더블 클릭
 - 맥 사용자는 터미널 창에서 `sh start_mac.sh` 실행
@@ -129,7 +129,7 @@ _에러 발생시 dodari_env폴더 삭제후 다시 실행해보세요._
 고급 사용자라면,
 
 ```bash
-git clone https://github.com/vEduardovich/dodari.git
+git clone https://github.com/choco6-git/dodari.git
 cd dodari
 ```
 - 윈도우는 `start_windows.bat` 실행
@@ -147,6 +147,7 @@ cd dodari
 dodari/
 ├── dodari_env         # 도다리 실행을 위한 관련 파일들이 설치되는 폴더
 ├── dodari.py          # 메인 애플리케이션
+├── dodari_cli.py      # 명령줄 버전 (스크립트·AI 에이전트용)
 ├── start_mac.sh       # 맥 실행 스크립트
 ├── start_ubuntu.sh    # 우분투 실행 스크립트
 ├── start_windows.bat  # 윈도우 실행 스크립트
@@ -155,6 +156,24 @@ dodari/
 ├── ui_config.json     # 이전 버전 업데이트용으로만 남긴 파일 — 직접 고치지 않음
 └── requirements.txt   # 의존성 목록
 ```
+
+<br>
+
+## 명령줄로 사용하기 (스크립트·AI 에이전트용)
+
+`dodari_cli.py`는 웹 화면을 열지 않고 웹 UI와 같은 번역을 실행합니다. 진행 로그는 stderr로, 결과는 stdout에 JSON 한 덩어리로 나와서 AI 에이전트가 그대로 읽을 수 있습니다.
+
+```bash
+dodari_env/bin/python dodari_cli.py inspect 책.pdf
+dodari_env/bin/python dodari_cli.py translate 책.pdf --target ko --engine claude --effort medium \
+    --format txt --range 10-30 --output-dir ./outputs
+```
+
+- `inspect`는 번역 없이 감지된 원문 언어, 장르 추정, 총 분량(PDF는 쪽수, EPUB은 챕터 수)을 알려 줍니다. `--range`를 정할 때 쓰세요.
+- `--range`는 PDF는 쪽수, EPUB은 챕터 번호입니다 (`10-30`, `10-`, `-30`). TXT는 항상 전체를 번역합니다.
+- `--format txt`는 EPUB/PDF 결과를 평문 TXT로 저장합니다. `--engine`을 생략하면 웹 UI에서 현재 선택된 엔진을 씁니다. `--genre`, `--tone`, `--bilingual-order`, `--source-lang`, `--model`은 선택 사항이며 `--help`로 볼 수 있습니다.
+- 종료 코드: `0` 전부 성공, `1` 일부 실패, `2` 인자 오류, `3` 시작하지 못함(엔진 미준비, 원문·목표 언어 동일 등), `130` 중단.
+- 중단된 번역은 같은 명령을 다시 실행하면 이어서 번역합니다. 큰 책은 오래 걸리니 백그라운드로 실행하세요.
 
 <br>
 
@@ -278,8 +297,8 @@ ollama rm gemma4:31b
 터미널: `[도다리 2/7] 도다리 내려받는 중…` → `[도다리 2/7] 내려받기 완료`(이미 있으면 `[도다리 2/7] 도다리가 이미 있어요`)
 
 - 설치 폴더에 `dodari.py`가 이미 있으면 건너뜁니다.
-- macOS / Linux: `git clone https://github.com/vEduardovich/dodari.git ~/dodari >> ~/dodari_install.log 2>&1`
-- Windows: `git clone https://github.com/vEduardovich/dodari.git "%USERPROFILE%\dodari" >> "%USERPROFILE%\dodari_install.log" 2>&1`
+- macOS / Linux: `git clone https://github.com/choco6-git/dodari.git ~/dodari >> ~/dodari_install.log 2>&1`
+- Windows: `git clone https://github.com/choco6-git/dodari.git "%USERPROFILE%\dodari" >> "%USERPROFILE%\dodari_install.log" 2>&1`
 
 ### 3. 설정 저장 **[outside workspace]**
 터미널: `[도다리 3/7] 설정 저장 중…` → `[도다리 3/7] 설정 저장 완료`
