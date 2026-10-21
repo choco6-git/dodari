@@ -4654,18 +4654,37 @@ def _dodari_html_to_text(html):
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
     return text.replace(_TXT_PRE_MARK, '')
 
-def _dodari_epub_to_txt(epub_path, txt_path):
-    book = epub.read_epub(epub_path)
-    docs = []
-    for entry in book.spine:
-        item = book.get_item_with_id(entry[0] if isinstance(entry, (tuple, list)) else entry)
-        if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT and not isinstance(item, epub.EpubNav):
-            docs.append(item)
-    if not docs:
-        docs = [i for i in book.get_items_of_type(ebooklib.ITEM_DOCUMENT) if not isinstance(i, epub.EpubNav)]
-    chapters = [t for t in (_dodari_html_to_text(d.get_content()) for d in docs) if t]
+def _dodari_epub_to_txt(epub_path, txt_path, doc_range=None):
+    if doc_range is not None:
+        with zipfile.ZipFile(epub_path, 'r') as zf:
+            contents = [zf.read(d) for d in _dodari_epub_spine_docs(epub_path)[doc_range[0] - 1:doc_range[1]]]
+    else:
+        book = epub.read_epub(epub_path)
+        docs = []
+        for entry in book.spine:
+            item = book.get_item_with_id(entry[0] if isinstance(entry, (tuple, list)) else entry)
+            if item is not None and item.get_type() == ebooklib.ITEM_DOCUMENT and not isinstance(item, epub.EpubNav):
+                docs.append(item)
+        if not docs:
+            docs = [i for i in book.get_items_of_type(ebooklib.ITEM_DOCUMENT) if not isinstance(i, epub.EpubNav)]
+        contents = [d.get_content() for d in docs]
+    chapters = [t for t in (_dodari_html_to_text(c) for c in contents) if t]
     with open(txt_path, 'w', encoding='utf-8') as fp:
         fp.write('\n\n'.join(chapters) + '\n')
+
+def _dodari_pdf_to_txt(pdf_path, txt_path, first, last):
+    if not FITZ_AVAILABLE:
+        raise RuntimeError('PyMuPDF is not installed')
+    pages = []
+    with fitz.open(pdf_path) as doc:
+        for idx in range(first, last + 1):
+            text = doc[idx].get_text().strip()
+            if text:
+                pages.append(text)
+    if not pages:
+        raise ValueError('no text layer in the selected pages (scanned PDF?)')
+    with open(txt_path, 'w', encoding='utf-8') as fp:
+        fp.write('\n\n'.join(pages) + '\n')
 
 def _dodari_parse_range(start, end):
     def conv(value):
@@ -6205,6 +6224,9 @@ class Dodari:
                 shutil.move(f'{self.temp_folder_1}.epub', done_path_1)
                 shutil.move(f'{self.temp_folder_2}.epub', done_path_2)
                 all_file_path.extend(self._maybe_convert_to_txt([done_path_1, done_path_2], output_format_val))
+                all_file_path.extend(self._write_original_txt(
+                    output_format_val, out_name, origin_abb,
+                    source_epub=file['path'], doc_range=resolved if range_active else None))
 
                 if self._finish_file_stats(file_summaries, f'{name}{ext}'):
                     print(f'[Resume] Partial result — keeping resume folders for a rerun: {self.temp_folder_1}, {self.temp_folder_2}')
@@ -6730,6 +6752,9 @@ class Dodari:
                     self._finalize_epub_book(book_2, chapters_2, done_path_2, name)
 
                     all_file_path.extend(self._maybe_convert_to_txt([done_path_1, done_path_2], output_format_val))
+                    all_file_path.extend(self._write_original_txt(
+                        output_format_val, out_name, origin_abb,
+                        source_pdf=file['path'], doc_range=(pdf_first, pdf_last)))
                     print(f'[PDF] Success! EPUB created: {done_path_1}, {done_path_2}')
                     if self._finish_file_stats(file_summaries, f'{name}{ext}'):
                         print(f'[Resume] Partial result — keeping resume folder for a rerun: {self.temp_folder_1}')
@@ -6794,6 +6819,7 @@ class Dodari:
                 output_file_2.write(translated_particle_2)
                 all_file_path.extend([output_file_1.name, output_file_2.name])
                 self.finalize_file_streams(book, output_file_1, output_file_2)
+                all_file_path.extend(self._write_original_txt(output_format_val, name, origin_abb, raw_text=book_raw))
                 if self._finish_file_stats(file_summaries, f'{name}{ext}'):
                     print(f'[Resume] Partial result — keeping resume folder for a rerun: {self.temp_folder_1}')
                 else:
@@ -8260,6 +8286,25 @@ class Dodari:
             final_paths.append(txt_path)
             print(f'[TXT] Plain text created: {txt_path}')
         return final_paths
+
+    def _write_original_txt(self, output_format_val, out_name, origin_abb, source_epub=None, doc_range=None, raw_text=None, source_pdf=None):
+        if output_format_val != OUTPUT_FORMAT_CHOICES_KO[1]:
+            return []
+        txt_path = os.path.join(self.output_folder, f'{out_name}_{origin_abb}.txt')
+        try:
+            os.makedirs(self.output_folder, exist_ok=True)
+            if source_pdf is not None:
+                _dodari_pdf_to_txt(source_pdf, txt_path, *doc_range)
+            elif source_epub is not None:
+                _dodari_epub_to_txt(source_epub, txt_path, doc_range)
+            else:
+                with open(txt_path, 'w', encoding='utf-8') as fp:
+                    fp.write(raw_text)
+        except Exception as err:
+            print(f'[TXT] Original text creation failed, skipping: {err}')
+            return []
+        print(f'[TXT] Original text created: {txt_path}')
+        return [txt_path]
 
     def finalize_file_streams(self, book, output_file_1, output_file_2):
         book.close()
