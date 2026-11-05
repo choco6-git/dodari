@@ -1,0 +1,15 @@
+{
+  "name": "himion",
+  "description": "Plugins by Himion Inc.",
+  "owner": {
+    "name": "Himion Inc.",
+    "url": "https://himion.com"
+  },
+  "plugins": [
+    {
+      "name": "dodari",
+      "source": "./plugins/dodari-claude",
+      "description": "Translate whole EPUB and TXT documents into 12 languages and get a translated file plus a bilingual file, with resumable jobs."
+    }
+  ]
+}
