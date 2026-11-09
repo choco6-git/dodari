@@ -248,6 +248,6 @@ echo "Starting Dodari while the vLLM server boots up."
 echo "Translation will be available once the server is ready."
 echo ""
 
-dodari_env/bin/python3 dodari.py
+GRADIO_SERVER_NAME=0.0.0.0 dodari_env/bin/python3 dodari.py
 
 deactivate

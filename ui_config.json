@@ -1,1 +1,1 @@
-{"ui_lang": "ko"}
+{"ui_lang": "ko", "engine": "claude-cli", "cli_models": {"claude-cli": {"model": "claude-haiku-5-5", "effort": "max"}}}
